@@ -81,16 +81,25 @@ async function analyzeCode(
   return comments;
 }
 
-function createPrompt(file: parseDiff.File, chunk: parseDiff.Chunk, prDetails: PRDetails): string {
+function createPrompt(
+  file: parseDiff.File,
+  chunk: parseDiff.Chunk,
+  prDetails: PRDetails
+): string {
   return `Your task is to review pull requests. Instructions:
 - Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
 - Do not give positive comments or compliments.
 - Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
+- Check the following code for proper logging and monitoring practices.
+- Review the given code for potential scalability issues.
+- Analyze the given code for code smells and suggest improvements.
 - IMPORTANT: NEVER suggest adding comments to the code.
 
-Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
+Review the following code diff in the file "${
+    file.to
+  }" and take the pull request title and description into account when writing the response.
 
 Pull request title: ${prDetails.title}
 Pull request description:
@@ -111,7 +120,9 @@ ${chunk.changes
 `;
 }
 
-async function getAIResponse(prompt: string): Promise<Array<{ lineNumber: string; reviewComment: string }> | null> {
+async function getAIResponse(
+  prompt: string
+): Promise<Array<{ lineNumber: string; reviewComment: string }> | null> {
   const queryConfig = {
     model: OPENAI_API_MODEL,
     temperature: 0.2,
@@ -127,7 +138,9 @@ async function getAIResponse(prompt: string): Promise<Array<{ lineNumber: string
       messages: [{ role: "system", content: prompt }],
     });
 
-    const res = JSON.parse(response.choices[0].message?.content?.trim() || "{}");
+    const res = JSON.parse(
+      response.choices[0].message?.content?.trim() || "{}"
+    );
     return res.reviews;
   } catch (error) {
     console.error("Error:", error);
@@ -135,7 +148,10 @@ async function getAIResponse(prompt: string): Promise<Array<{ lineNumber: string
   }
 }
 
-function createComment(file: parseDiff.File, aiResponses: Array<{ lineNumber: string; reviewComment: string }>): Array<{ body: string; path: string; line: number }> {
+function createComment(
+  file: parseDiff.File,
+  aiResponses: Array<{ lineNumber: string; reviewComment: string }>
+): Array<{ body: string; path: string; line: number }> {
   return aiResponses.flatMap((aiResponse) => {
     if (!file.to) return [];
 
@@ -147,20 +163,43 @@ function createComment(file: parseDiff.File, aiResponses: Array<{ lineNumber: st
   });
 }
 
-async function createReviewComment(owner: string, repo: string, pull_number: number, comments: Array<{ body: string; path: string; line: number }>): Promise<void> {
-  await octokit.pulls.createReview({ owner, repo, pull_number, comments, event: "COMMENT" });
+async function createReviewComment(
+  owner: string,
+  repo: string,
+  pull_number: number,
+  comments: Array<{ body: string; path: string; line: number }>
+): Promise<void> {
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number,
+    comments,
+    event: "COMMENT",
+  });
 }
 
 async function main() {
   const prDetails = await getPRDetails();
   let diff: string | null;
-  const eventData = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH || "", "utf8"));
+  const eventData = JSON.parse(
+    readFileSync(process.env.GITHUB_EVENT_PATH || "", "utf8")
+  );
 
   if (eventData.action === "opened") {
-    diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+    diff = await getDiff(
+      prDetails.owner,
+      prDetails.repo,
+      prDetails.pull_number
+    );
   } else if (eventData.action === "synchronize") {
     const { before, after } = eventData;
-    const response = await octokit.repos.compareCommits({ owner: prDetails.owner, repo: prDetails.repo, base: before, head: after, headers: { accept: "application/vnd.github.v3.diff" } });
+    const response = await octokit.repos.compareCommits({
+      owner: prDetails.owner,
+      repo: prDetails.repo,
+      base: before,
+      head: after,
+      headers: { accept: "application/vnd.github.v3.diff" },
+    });
 
     diff = String(response.data);
   } else {
@@ -174,13 +213,24 @@ async function main() {
   }
 
   const parsedDiff = parseDiff(diff);
-  const excludePatterns = core.getInput("exclude").split(",").map((s) => s.trim());
-  const filteredDiff = parsedDiff.filter((file) => !excludePatterns.some((pattern) => minimatch(file.to || "", pattern)));
+  const excludePatterns = core
+    .getInput("exclude")
+    .split(",")
+    .map((s) => s.trim());
+  const filteredDiff = parsedDiff.filter(
+    (file) =>
+      !excludePatterns.some((pattern) => minimatch(file.to || "", pattern))
+  );
 
   const comments = await analyzeCode(filteredDiff, prDetails);
 
   if (comments.length > 0) {
-    await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+    await createReviewComment(
+      prDetails.owner,
+      prDetails.repo,
+      prDetails.pull_number,
+      comments
+    );
   }
 }
 
